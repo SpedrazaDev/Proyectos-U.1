@@ -1,8 +1,14 @@
+import os
+import pickle
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, 
-                           QGridLayout, QVBoxLayout, QLabel)
+                           QGridLayout, QVBoxLayout, QLabel, QInputDialog,
+                            QLineEdit, QMessageBox)
 from PyQt6.QtCore import Qt
 import random as rd
 import sys
+import json
+import datetime
+
 
 def centrar_ventana(ventana):
     """Centra la ventana en la pantalla"""
@@ -185,10 +191,19 @@ def crear_Matriz(tamano,nivel):
     """)
     btn_volver.clicked.connect(lambda: [ventana_juego.hide(), ventana_menu.show()])
     
+    btn_guardar_partida = QPushButton("Guardar Partida")
+    btn_guardar_partida.setStyleSheet("""
+        font-size: 16px; padding: 10px;
+        background-color: #269e30; color: #000000;
+        border: 2px solid #a8e6ad;
+    """)
+    btn_guardar_partida.clicked.connect(guardar_partida_interfaz)
+    
     # Configurar layout principal
     main_layout = QVBoxLayout()
     main_layout.addLayout(grid_layout)
     main_layout.addWidget(btn_volver)
+    main_layout.addWidget(btn_guardar_partida)
     
     # Asignar layout a la ventana (esto faltaba)
     ventana_juego.setLayout(main_layout)
@@ -199,6 +214,7 @@ def crear_Matriz(tamano,nivel):
     # Iniciar juego con posición aleatoria
     x, y = rd.randint(0, tamano-1), rd.randint(0, tamano-1)
     infectar_celda(x, y)
+    
     
     centrar_ventana(ventana_juego)
     ventana_juego.show()
@@ -215,6 +231,9 @@ def infectar_celda(x: int, y: int) -> bool:
             font-size: {int(boton.width()*0.6)}px;
         """)
         posiciones_infectadas.add((x, y))
+        estado = estado_matriz(filas_actual, columnas_actual,
+                             posiciones_infectadas, posiciones_bloqueadas)
+        # imprimir_estado_base3(estado)
         return True
     return False
 
@@ -229,6 +248,9 @@ def boton_Usr(x, y):
             font-size: {int(boton.width()*0.6)}px;
         """)
         posiciones_bloqueadas.add((x, y))
+        estado = estado_matriz(filas_actual, columnas_actual, 
+                             posiciones_infectadas, posiciones_bloqueadas)
+        # imprimir_estado_base3(estado)
         propagar_virus()
 
 
@@ -266,21 +288,160 @@ def propagar_virus():
         for celda in celdas_a_infectar:
             infectar_celda(*celda)
 
+# def guardar_estado_matriz(matriz):
+#     for e in len(matriz):
+#         posiciones_infectadas.
 
-def niveles():
-    global niveles
+def estado_matriz(filas, columnas, posInfectadas, posBloqueadas):
+    estado_Matriz=[]
 
-    for nivel in niveles:
-        if nivel == "Facil":
-            pass
-        elif nivel == "Medio":
-            pass
-        elif nivel == "Dificil":
-            pass
-            
+    for y in range(filas):
+        fila=[]
+        for x in range(columnas):
+            if (x, y) in posInfectadas:
+                fila.append(1)  # Virus
+            elif (x, y) in posBloqueadas:
+                fila.append(2)  # Barrera
+            else:
+                fila.append(0)  # Libre
+        estado_Matriz.append(fila)
+    return estado_Matriz
 
 
+def imprimir_estado_base3(matriz_estado):
+    """Imprime la matriz en base 3 de forma legible"""
+    print("\nEstado actual del tablero (Base 3):")
+    for fila in matriz_estado:
+        print(" ".join(map(str, fila)))
+    print()
+
+
+def evitar_islas():
     pass
+
+def guardar_partida(nombre_partida, estado_juego) -> bool:
+    """
+    Guarda el estado del juego en archivo binario y actualiza el registro JSON
+    Args:
+        nombre_partida: Nombre personalizado que el usuario asigna
+        estado_juego: Diccionario con el estado actual del juego
+    Returns:
+        bool: True si se guardó correctamente, False si hubo error
+    """
+    try:
+        # Configurar rutas y directorios
+        carpeta = "Partidas"
+        os.makedirs(carpeta, exist_ok=True)
+        
+        # Sanitizar nombre del archivo
+        nombre_archivo = f"{nombre_partida}.bin"
+        ruta_bin = os.path.join(carpeta, nombre_archivo)
+        ruta_json = os.path.join(carpeta, "registro_partidas.json")
+        
+        # Verificar si ya existe la partida
+        if os.path.exists(ruta_bin):
+            raise FileExistsError(f"Ya existe una partida con el nombre '{nombre_partida}'")
+
+        # Convertir matriz a representación hexadecimal
+        matriz_base3 = estado_matriz(
+            estado_juego['filas'],
+            estado_juego['columnas'],
+            estado_juego['infectadas'],
+            estado_juego['bloqueadas']
+        )
+        
+        hex_lista = []
+        for fila in matriz_base3:
+            fila_str = ''.join(map(str, fila))
+            num_decimal = int(fila_str, 3)
+            hex_lista.append(hex(num_decimal))
+
+        # Preparar datos con metadatos
+        datos = {
+            'nivel': estado_juego['nivel'],
+            'hex_data': hex_lista,
+            'datos_extra': {
+                'nombre': nombre_partida,
+                # 'fecha': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'filas': estado_juego['filas'],
+                'columnas': estado_juego['columnas']
+            }
+        }
+
+        # Guardar archivo binario
+        with open(ruta_bin, 'wb') as file:
+            pickle.dump(datos, file)
+        
+        # Actualizar registro JSON
+        actualizar_registro_partidas(ruta_json, nombre_partida, ruta_bin, datos)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error al guardar partida: {e}")
+        return False
+
+def actualizar_registro_partidas(ruta_json, nombre_partida, ruta_bin, datos):
+    """
+    Actualiza el archivo JSON con los datos extra de la partida
+    Args:
+        ruta_json: Ruta del archivo JSON de registro
+        nombre_partida: Nombre personalizado de la partida
+        ruta_bin: Ruta del archivo binario guardado
+        datos: Datos de la partida a registrar
+    """
+    try:
+        # Cargar registro existente o crear nuevo
+        if os.path.exists(ruta_json):
+            with open(ruta_json, 'r', encoding='utf-8') as file:
+                registro = json.load(file)
+        else:
+            registro = {}
+        
+        # Actualizar registro
+        registro[nombre_partida] = {
+            'archivo': os.path.basename(ruta_bin),
+            'nivel': datos['nivel'],
+            # 'fecha': datos['metadata']['fecha'],
+            'ruta_completa': ruta_bin
+        }
+        
+        # Guardar registro
+        with open(ruta_json, 'w', encoding='utf-8') as file:
+            json.dump(registro, file, indent=2, ensure_ascii=False)
+            
+    except Exception as e:
+        print(f"Error al actualizar registro: {e}")
+
+def guardar_partida_interfaz():
+    """
+    Muestra diálogo para guardar partida y maneja la interacción con el usuario
+    """
+    nombre, ok = QInputDialog.getText(
+        ventana_juego, 
+        "Guardar partida",
+        "Nombre para esta partida:",
+        QLineEdit.EchoMode.Normal,
+        # f"partida_{datetime.now().strftime('%Y%m%d_%H%M')}"
+    )
+    
+    if ok and nombre:
+        estado_actual = {
+            'nivel': nivel_actual,
+            'filas': filas_actual,
+            'columnas': columnas_actual,
+            'infectadas': posiciones_infectadas,
+            'bloqueadas': posiciones_bloqueadas
+        }
+        
+        if guardar_partida(nombre, estado_actual):
+            QMessageBox.information(ventana_juego, "Éxito", f"Partida '{nombre}' guardada correctamente")
+        else:
+            QMessageBox.warning(ventana_juego, "Error", "No se pudo guardar la partida")
+
+
+
+
 # Iniciar la aplicación
 mostrar_menu_principal()
 sys.exit(app.exec())
