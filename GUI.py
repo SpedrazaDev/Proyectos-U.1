@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton,
                            QGridLayout, QVBoxLayout, QLabel, QInputDialog,
                             QLineEdit, QMessageBox)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
+
 import random as rd
 import sys
 import json
@@ -32,11 +34,15 @@ ventana_niveles = QWidget()
 ventana_niveles.setWindowTitle("Selección de Nivel")
 ventana_niveles.setStyleSheet("background-color: #f0f0f0;")
 
+
+
+
 # Variables globales
 grid_layout = QGridLayout()
 matriz_botones = []
 posiciones_infectadas = set()
 posiciones_bloqueadas = set()
+posiciones_inhabilitadas= set()
 filas_actual = 0
 columnas_actual = 0
 
@@ -154,6 +160,7 @@ def crear_Matriz(tamano,nivel):
     matriz_botones.clear()
     posiciones_infectadas.clear()
     posiciones_bloqueadas.clear()
+    posiciones_inhabilitadas.clear()
 
 
     # Limpiar layout existente
@@ -176,6 +183,7 @@ def crear_Matriz(tamano,nivel):
                 border: 2px outset #a8e6ad;
                 background: #a8e6ad;
             """)
+            boton.clicked.connect(lambda _,x=x, y=y: evitar_islas(x,y))
             boton.clicked.connect(lambda _, px=x, py=y: boton_Usr(px, py))
             grid_layout.addWidget(boton, y, x)
             fila_botones.append(boton)
@@ -239,7 +247,7 @@ def infectar_celda(x: int, y: int) -> bool:
 
 def boton_Usr(x, y):
     """Maneja el clic del jugador para colocar bloques"""
-    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas:
+    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas and (x,y) not in posiciones_inhabilitadas:
         boton = matriz_botones[y][x]
         boton.setText("🧱")
         boton.setStyleSheet(f"""
@@ -316,8 +324,50 @@ def imprimir_estado_base3(matriz_estado):
     print()
 
 
-def evitar_islas():
-    pass
+def evitar_islas(x: int, y:int):
+    cont=0
+    fueraDeMatriz=set()
+    dentroDeMatriz=set()
+
+    coordenadas_adyacentes = ((0,1), (1,0), (0,-1), (-1,0))
+    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas:
+        
+        for xVecino, yVecino in coordenadas_adyacentes:                                                     #para celda adyacentes a la seleccion
+            xVecino, yVecino = x + xVecino, y + yVecino                                                     
+            cont=0                                                                                          
+            for xAdyacente,yAdyacente in coordenadas_adyacentes:                                            #para cada celda adyacente a las adyacentes a la seleccion
+                xAdyacente, yAdyacente = xAdyacente + xVecino, yAdyacente + yVecino                         #(estas son las celdas a validar si son un muro o no)
+                                                                                                            
+                if not (0 <= xAdyacente < columnas_actual and 0 <= yAdyacente < filas_actual) :             #se valida si las celdas vecinas a la seleccionada son parte de la matriz
+                    fueraDeMatriz.add((xAdyacente, yAdyacente))                                             
+                if (0 <= xVecino < columnas_actual and 0 <= yVecino < filas_actual):                        
+                    dentroDeMatriz.add((xVecino,yVecino))                                                   
+                                                                                                            
+                if (xAdyacente,yAdyacente) in posiciones_bloqueadas:                                        #en condiciones normales se validan las celdas bloqueadas y se aumenta el contador
+                    cont+=1                                                                                 
+                elif (xAdyacente,yAdyacente) in fueraDeMatriz and (xVecino,yVecino) in dentroDeMatriz:      #si es un borde se toma las celdas fuera de la matriz como "bloqueadas" y se aumenta el contador
+                    cont+=1                                                                                 
+                                                                                                            
+                if cont==3:                                                                                 #Si una celda tiene 3 posiciones bloqueadas adyacentes no puede tener una cuarta porque sería una isla
+                    cont=0                                                                                  #
+                    boton= matriz_botones[y][x]                                                             #se manipula el color del botón seleccionado a uno mas oscuro para mostrar que está "bloqueado"
+                    boton.setStyleSheet("""
+                        font-size: {int(tamano_boton*0.6)}px; 
+                        border: 2px outset #a4dbc7;
+                        background: #a4dbc7;
+                    """)
+                    posiciones_inhabilitadas.add((x, y))                                                    #Se inhabilita esa posicion para que no sea reemplazada por un muro
+                    mostrar_ventana_celdaBloqueada()                                                        #se muestra un mensaje que dice que no es una jugada valida
+                    
+def mostrar_ventana_celdaBloqueada():
+    msg = QMessageBox()
+    msg.setWindowTitle("Jugada no permitida")
+    pixmap = QPixmap("Imagenes\isla.png") 
+    pixmap = pixmap.scaled(150, 150,aspectRatioMode=Qt.AspectRatioMode.KeepAspectRatio)
+    msg.setIconPixmap(pixmap)
+    msg.setText("¡Esta jugada no es valida!")
+    msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+    msg.exec()
 
 def guardar_partida(nombre_partida, estado_juego) -> bool:
     """
