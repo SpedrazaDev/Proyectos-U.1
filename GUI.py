@@ -2,14 +2,15 @@ import os
 import pickle
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, 
                            QGridLayout, QVBoxLayout, QLabel, QInputDialog,
-                            QLineEdit, QMessageBox)
+                            QLineEdit, QMessageBox, QDialog)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import QMessageBox as QMBox
 
 import random as rd
 import sys
 import json
-import datetime
+from datetime import datetime
 
 
 def centrar_ventana(ventana):
@@ -20,6 +21,23 @@ def centrar_ventana(ventana):
     ventana.move(frame.topLeft())
 
 app = QApplication(sys.argv)
+app.setStyleSheet("""
+    QMessageBox, QInputDialog {
+        background-color: #f0f0f0;
+    }
+    QMessageBox QLabel, QInputDialog QLabel, QLineEdit {
+        color: black;
+    }
+    QMessageBox QPushButton, QInputDialog QPushButton {
+        color: black;
+        background-color: #e0e0e0;
+    }
+    QComboBox, QComboBox QAbstractItemView {
+        color: black;
+        background-color: white;
+    }
+                  
+""")
 
 # Configuración de ventanas
 ventana_juego = QWidget()
@@ -34,22 +52,15 @@ ventana_niveles = QWidget()
 ventana_niveles.setWindowTitle("Selección de Nivel")
 ventana_niveles.setStyleSheet("background-color: #f0f0f0;")
 
-
-
-
 # Variables globales
 grid_layout = QGridLayout()
 matriz_botones = []
 posiciones_infectadas = set()
 posiciones_bloqueadas = set()
-posiciones_inhabilitadas= set()
+posiciones_inhabilitadas = set()
 filas_actual = 0
 columnas_actual = 0
-
-
-nivel_actual={"Facil":10,
-         "Medio":15,
-         "Dificil":20}
+nivel_actual = "Facil"  # Valor por defecto
 
 def mostrar_menu_principal():
     """Muestra el menú principal centrado"""
@@ -65,32 +76,41 @@ def mostrar_menu_principal():
     """)
     
     btn_juego = QPushButton("Jugar Virus Spread")
+    btn_cargar = QPushButton("Cargar Partida")
     btn_salir = QPushButton("Salir del Juego")
     
     estilo_boton = """
         QPushButton {
-            font-size: 20px; padding: 15px; margin: 10px;
-            background-color: #269e30; color: #000000;
-            border: 2px solid #a8e6ad; border-radius: 8px;
+            font-size: 20px; 
+            padding: 15px; 
+            margin: 10px;
+            background-color: #269e30; 
+            color: #000000;
+            border: 2px solid #a8e6ad; 
+            border-radius: 8px;
             min-width: 200px;
         }
-        QPushButton:hover { background-color: #a8e6ad; }
+        QPushButton:hover { 
+            background-color: #a8e6ad; 
+        }
     """
     
-    for boton in [btn_juego, btn_salir]:
+    for boton in [btn_juego, btn_cargar, btn_salir]:
         boton.setStyleSheet(estilo_boton)
     
     btn_juego.clicked.connect(mostrar_menu_niveles)
+    btn_cargar.clicked.connect(cargar_partida_interfaz)
     btn_salir.clicked.connect(ventana_menu.close)
     
     layout.addWidget(titulo)
     layout.addStretch(1)
     layout.addWidget(btn_juego)
+    layout.addWidget(btn_cargar)
     layout.addWidget(btn_salir)
     layout.addStretch(1)
     
     ventana_menu.setLayout(layout)
-    ventana_menu.resize(500, 400)  # Tamaño fijo para el menú
+    ventana_menu.resize(500, 400)
     centrar_ventana(ventana_menu)
     ventana_menu.show()
 
@@ -141,19 +161,18 @@ def mostrar_menu_niveles():
     layout.addWidget(btn_volver)
     
     ventana_niveles.setLayout(layout)
-    ventana_niveles.resize(500, 400)  # Tamaño fijo para el menú de niveles
+    ventana_niveles.resize(500, 400)
     centrar_ventana(ventana_niveles)
     ventana_niveles.show()
 
-def crear_Matriz(tamano,nivel):
-    """Crea la matriz de juego con el tamaño especificado"""
+def crear_Matriz(tamano, nivel, cargando_partida=False):
+    """Crea la matriz de juego con el tamaño especificado
+    cargando_partida: Indica si estamos cargando una partida guardada"""
     global nivel_actual, filas_actual, columnas_actual, matriz_botones
     
-    # Actualizar variables globales
     nivel_actual = nivel
     filas_actual = tamano
     columnas_actual = tamano
-    
     
     # Limpiar estado anterior
     ventana_niveles.hide()
@@ -162,15 +181,14 @@ def crear_Matriz(tamano,nivel):
     posiciones_bloqueadas.clear()
     posiciones_inhabilitadas.clear()
 
-
     # Limpiar layout existente
-    for i in reversed(range(grid_layout.count())): 
-        grid_layout.itemAt(i).widget().setParent(None)
+    while grid_layout.count():
+        child = grid_layout.takeAt(0)
+        if child.widget():
+            child.widget().deleteLater()
     
-     # Calcular tamaño de botón (fijo para simplificar)
-    tamano_boton = 40 if tamano <= 15 else 30  # Más pequeño para nivel difícil
-
-  
+    # Calcular tamaño de botón
+    tamano_boton = 40 if tamano <= 15 else 30
 
     # Crear matriz de botones
     for y in range(tamano):
@@ -178,17 +196,16 @@ def crear_Matriz(tamano,nivel):
         for x in range(tamano):
             boton = QPushButton()
             boton.setFixedSize(tamano_boton, tamano_boton)
-            boton.setStyleSheet("""
+            boton.setStyleSheet(f"""
                 font-size: {int(tamano_boton*0.6)}px; 
                 border: 2px outset #a8e6ad;
                 background: #a8e6ad;
             """)
-            boton.clicked.connect(lambda _,x=x, y=y: evitar_islas(x,y))
+            boton.clicked.connect(lambda _, x=x, y=y: evitar_islas(x, y))
             boton.clicked.connect(lambda _, px=x, py=y: boton_Usr(px, py))
             grid_layout.addWidget(boton, y, x)
             fila_botones.append(boton)
         matriz_botones.append(fila_botones)
-    
     
     # Botón para volver
     btn_volver = QPushButton("Volver al Menú")
@@ -213,284 +230,385 @@ def crear_Matriz(tamano,nivel):
     main_layout.addWidget(btn_volver)
     main_layout.addWidget(btn_guardar_partida)
     
-    # Asignar layout a la ventana (esto faltaba)
     ventana_juego.setLayout(main_layout)
-    
-    # Ajustar tamaño de ventana
     ventana_juego.setFixedSize(tamano_boton * tamano + 50, tamano_boton * tamano + 100)
     
-    # Iniciar juego con posición aleatoria
-    x, y = rd.randint(0, tamano-1), rd.randint(0, tamano-1)
-    infectar_celda(x, y)
-    
+    # Solo agregar virus aleatorio si no estamos cargando una partida
+    if not cargando_partida:
+        x, y = rd.randint(0, tamano-1), rd.randint(0, tamano-1)
+        infectar_celda(x, y)
     
     centrar_ventana(ventana_juego)
     ventana_juego.show()
-
 
 def infectar_celda(x: int, y: int) -> bool:
     """Infecta una celda si está disponible"""
     if (x, y) not in posiciones_bloqueadas and (x, y) not in posiciones_infectadas:
         boton = matriz_botones[y][x]
+        tamano_boton = boton.width()
         boton.setText("🦠")
         boton.setStyleSheet(f"""
             background-color: #f5e8c9;  
             border: 2px inset #f5e8c9;  
-            font-size: {int(boton.width()*0.6)}px;
+            font-size: {int(tamano_boton*0.6)}px;
         """)
         posiciones_infectadas.add((x, y))
-        estado = estado_matriz(filas_actual, columnas_actual,
-                             posiciones_infectadas, posiciones_bloqueadas)
-        # imprimir_estado_base3(estado)
         return True
     return False
 
 def boton_Usr(x, y):
     """Maneja el clic del jugador para colocar bloques"""
-    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas and (x,y) not in posiciones_inhabilitadas:
+    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas and (x, y) not in posiciones_inhabilitadas:
         boton = matriz_botones[y][x]
+        tamano_boton = boton.width()
         boton.setText("🧱")
         boton.setStyleSheet(f"""
             background-color: #f5e8c9;  
             border: 2px inset #f5e8c9;  
-            font-size: {int(boton.width()*0.6)}px;
+            font-size: {int(tamano_boton*0.6)}px;
         """)
         posiciones_bloqueadas.add((x, y))
-        estado = estado_matriz(filas_actual, columnas_actual, 
-                             posiciones_infectadas, posiciones_bloqueadas)
-        # imprimir_estado_base3(estado)
         propagar_virus()
-
 
 def propagar_virus():
     """Propaga el virus a celdas adyacentes"""
-    celdas_a_infectar=set()
+    celdas_a_infectar = set()
     coordenadas_adyacentes = ((0,1), (1,0), (0,-1), (-1,0))
     
     for (x, y) in posiciones_infectadas:
         for dx, dy in coordenadas_adyacentes:
             nx, ny = x + dx, y + dy
-            if (0 <= nx < len(matriz_botones)) and (0 <= ny < len(matriz_botones[0]) and 
+            if (0 <= nx < columnas_actual and 0 <= ny < filas_actual and 
                 (nx, ny) not in posiciones_infectadas and 
                 (nx, ny) not in posiciones_bloqueadas):
                 celdas_a_infectar.add((nx, ny))
     
-    # Aplicamos la lógica según el nivel
+    if not celdas_a_infectar:
+        return
+    
     if nivel_actual == "Facil":
-        if celdas_a_infectar:
-            infectar_celda(*rd.choice(list(celdas_a_infectar)))
+        infectar_celda(*rd.choice(list(celdas_a_infectar)))
     
     elif nivel_actual == "Medio":
-        if len(celdas_a_infectar) >= 2:
-            # Infectamos 2 celdas aleatorias diferentes
-            infectadas = rd.sample(list(celdas_a_infectar), 2)
-            for celda in infectadas:
-                infectar_celda(*celda)
-        elif celdas_a_infectar:
-            # Si hay menos de 2, infectamos las que haya
-            for celda in celdas_a_infectar:
-                infectar_celda(*celda)
+        infectadas = rd.sample(list(celdas_a_infectar), min(2, len(celdas_a_infectar)))
+        for celda in infectadas:
+            infectar_celda(*celda)
     
     elif nivel_actual == "Dificil":
-        # Infectamos todas las celdas adyacentes disponibles
-        for celda in celdas_a_infectar:
+        infectadas = rd.sample(list(celdas_a_infectar), min(3, len(celdas_a_infectar)))
+        for celda in infectadas:
             infectar_celda(*celda)
 
-# def guardar_estado_matriz(matriz):
-#     for e in len(matriz):
-#         posiciones_infectadas.
+def estado_matriz(filas, columnas, infectadas, bloqueadas):
+    """Crea una representación del estado del juego"""
+    return {
+        'filas': filas,
+        'columnas': columnas,
+        'infectadas': infectadas,
+        'bloqueadas': bloqueadas,
+        'nivel': nivel_actual
+    }
 
-def estado_matriz(filas, columnas, posInfectadas, posBloqueadas):
-    estado_Matriz=[]
+def guardar_partida_interfaz():
+    """Muestra diálogo para guardar partida"""
+    nombre_partida, ok = QInputDialog.getText(
+        ventana_juego,
+        "Guardar Partida",
+        "Ingrese un nombre para la partida:",
+        QLineEdit.EchoMode.Normal,
+        f"partida_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
+    
+    if ok and nombre_partida:
+        estado = estado_matriz(filas_actual, columnas_actual, 
+                             posiciones_infectadas, posiciones_bloqueadas)
+        if guardar_PartidasBin(nombre_partida, estado):
+            msg = QMessageBox(ventana_juego)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle("Éxito")
+            msg.setText("Partida guardada correctamente")
+            msg.setStyleSheet("""
+                QMessageBox {
+                    background-color: #f0f0f0;
+                }
+                QLabel {
+                    color: black;
+                }
+                QPushButton {
+                    color: black;
+                    background-color: #e0e0e0;
+                }
+            """)
+            msg.exec()  # Cambiado de exec_() a exec()
 
-    for y in range(filas):
-        fila=[]
-        for x in range(columnas):
-            if (x, y) in posInfectadas:
-                fila.append(1)  # Virus
-            elif (x, y) in posBloqueadas:
-                fila.append(2)  # Barrera
-            else:
-                fila.append(0)  # Libre
-        estado_Matriz.append(fila)
-    return estado_Matriz
+def cargar_partida_interfaz():
+    """Muestra diálogo para cargar partida"""
+    try:
+        partidas = []
+        if os.path.exists("Partidas"):
+            partidas = [f[:-4] for f in os.listdir("Partidas") if f.endswith(".bin")]
+        
+        if not partidas:
+            msg = QMessageBox(ventana_menu)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle("Información")
+            msg.setText("No hay partidas guardadas")
+            msg.setStyleSheet("""
+                QMessageBox {
+                    background-color: #f0f0f0;
+                }
+                QLabel {
+                    color: black;
+                }
+                QPushButton {
+                    color: black;
+                    background-color: #e0e0e0;
+                }
+            """)
+            msg.exec()
+            return
+        
+        # Versión simplificada que funciona correctamente
+        partida, ok = QInputDialog.getItem(
+            ventana_menu,
+            "Cargar Partida",
+            "Seleccione una partida:",
+            partidas,
+            0, 
+            False
+        )
+        
+        # Aplicar estilo solo al QInputDialog
+        for child in ventana_menu.findChildren(QInputDialog):
+            child.setStyleSheet("""
+                QInputDialog {
+                    background-color: #f0f0f0;
+                }
+                QLabel {
+                    color: black;
+                }
+                
+                QComboBox QAbstractItemView {
+                    color: black;
+                    background-color: white;
+                    selection-background-color: #a8e6ad;
+                }
+                QPushButton {
+                    color: black;
+                    background-color: #e0e0e0;
+                }
+            """)
+        
+        if ok and partida:
+            estado = cargar_PartidaBin(partida)
+            if estado:
+                crear_Matriz(estado['filas'], estado['nivel'], cargando_partida=True)
+                
+                global posiciones_infectadas, posiciones_bloqueadas
+                posiciones_infectadas = estado['infectadas']
+                posiciones_bloqueadas = estado['bloqueadas']
+                
+                for y in range(estado['filas']):
+                    for x in range(estado['columnas']):
+                        if (x, y) in posiciones_infectadas:
+                            matriz_botones[y][x].setText("🦠")
+                            matriz_botones[y][x].setStyleSheet(f"""
+                                background-color: #f5e8c9;
+                                border: 2px inset #f5e8c9;
+                                font-size: {int(matriz_botones[y][x].width()*0.6)}px;
+                            """)
+                        elif (x, y) in posiciones_bloqueadas:
+                            matriz_botones[y][x].setText("🧱")
+                            matriz_botones[y][x].setStyleSheet(f"""
+                                background-color: #f5e8c9;
+                                border: 2px inset #f5e8c9;
+                                font-size: {int(matriz_botones[y][x].width()*0.6)}px;
+                            """)
+                
+                ventana_menu.hide()
+                ventana_juego.show()
+            
+    except Exception as e:
+        msg = QMessageBox(ventana_menu)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Error")
+        msg.setText(f"Error al cargar:\n{str(e)}")
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #f0f0f0;
+            }
+            QLabel {
+                color: black;
+            }
+            QPushButton {
+                color: black;
+                background-color: #e0e0e0;
+            }
+        """)
+        msg.exec()
 
 
-def imprimir_estado_base3(matriz_estado):
-    """Imprime la matriz en base 3 de forma legible"""
-    print("\nEstado actual del tablero (Base 3):")
-    for fila in matriz_estado:
-        print(" ".join(map(str, fila)))
-    print()
+def guardar_PartidasBin(nombre_partida, estado_juego):
+    """Guarda la partida en binario según las especificaciones"""
+    try:
+        os.makedirs("Partidas", exist_ok=True)
+        
+        filas = estado_juego['filas']
+        columnas = estado_juego['columnas']
+        
+        nivel_juego = {"Facil": 0, "Medio": 1, "Dificil": 2}
+        nivel_num = nivel_juego.get(estado_juego['nivel'], 0)
+        
+        # Preparar matriz en base 3
+        matriz_base3 = []
+        for y in range(filas):
+            fila = []
+            for x in range(columnas):
+                if (x, y) in estado_juego['infectadas']:
+                    fila.append(1)
+                elif (x, y) in estado_juego['bloqueadas']:
+                    fila.append(2)
+                else:
+                    fila.append(0)
+            matriz_base3.append(fila)
+        
+        # Convertir cada fila a bytes
+        with open(os.path.join("Partidas", f"{nombre_partida}.bin"), 'wb') as f:
+            # Escribir cabecera (filas, columnas, nivel)
+            f.write(filas.to_bytes(2, byteorder='big'))
+            f.write(columnas.to_bytes(2, byteorder='big'))
+            f.write(nivel_num.to_bytes(1, byteorder='big'))
+            
+            # Escribir cada fila
+            for fila in matriz_base3:
+                # Convertir lista base3 a número
+                num = 0
+                for i, val in enumerate(fila):
+                    num += val * (3 ** (len(fila) - i - 1))
+                
+                # Convertir a bytes con tamaño fijo
+                bytes_necesarios = (len(fila) * 2 + 7) // 8  # Calcula bytes necesarios
+                f.write(num.to_bytes(bytes_necesarios, byteorder='big'))
+        
+        return True
+    except Exception as e:
+        print(f"Error al guardar: {e}")
+        return False
+    
+def cargar_PartidaBin(nombre_partida):
+    """Carga partida desde archivo binario"""
+    try:
+        ruta = os.path.join("Partidas", f"{nombre_partida}.bin")
+        if not os.path.exists(ruta):
+            return None
+
+        with open(ruta, 'rb') as f:
+            # Leer cabecera
+            filas = int.from_bytes(f.read(2), 'big')
+            columnas = int.from_bytes(f.read(2), 'big')
+            nivel_num = int.from_bytes(f.read(1), 'big')
+            nivel_map = {0: "Facil", 1: "Medio", 2: "Dificil"}
+            nivel = nivel_map.get(nivel_num, "Facil")
+            
+            # Calcular bytes por fila
+            bytes_por_fila = (columnas * 2 + 7) // 8
+            
+            # Leer cada fila
+            matriz_base3 = []
+            for _ in range(filas):
+                num = int.from_bytes(f.read(bytes_por_fila), 'big')
+                fila = []
+                for _ in range(columnas):
+                    fila.insert(0, num % 3)
+                    num = num // 3
+                # Asegurar longitud correcta
+                fila = [0]*(columnas - len(fila)) + fila
+                matriz_base3.append(fila)
+        
+        # Reconstruir posiciones
+        pos_infectadas = {(x,y) for y in range(filas) for x in range(columnas) if matriz_base3[y][x] == 1}
+        pos_bloqueadas = {(x,y) for y in range(filas) for x in range(columnas) if matriz_base3[y][x] == 2}
+        
+        return {
+            'filas': filas,
+            'columnas': columnas,
+            'nivel': nivel,
+            'infectadas': pos_infectadas,
+            'bloqueadas': pos_bloqueadas
+        }
+    except Exception as e:
+        print(f"Error al cargar: {e}")
+        return None
 
 
-def evitar_islas(x: int, y:int):
-    cont=0
-    fueraDeMatriz=set()
-    dentroDeMatriz=set()
+
+def evitar_islas(x: int, y: int):
+    """Evita que se creen islas al colocar bloques"""
+    cont = 0
+    fueraDeMatriz = set()
+    dentroDeMatriz = set()
 
     coordenadas_adyacentes = ((0,1), (1,0), (0,-1), (-1,0))
     if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas:
         
-        for xVecino, yVecino in coordenadas_adyacentes:                                                     #para celda adyacentes a la seleccion
-            xVecino, yVecino = x + xVecino, y + yVecino                                                     
-            cont=0                                                                                          
-            for xAdyacente,yAdyacente in coordenadas_adyacentes:                                            #para cada celda adyacente a las adyacentes a la seleccion
-                xAdyacente, yAdyacente = xAdyacente + xVecino, yAdyacente + yVecino                         #(estas son las celdas a validar si son un muro o no)
-                                                                                                            
-                if not (0 <= xAdyacente < columnas_actual and 0 <= yAdyacente < filas_actual) :             #se valida si las celdas vecinas a la seleccionada son parte de la matriz
-                    fueraDeMatriz.add((xAdyacente, yAdyacente))                                             
-                if (0 <= xVecino < columnas_actual and 0 <= yVecino < filas_actual):                        
-                    dentroDeMatriz.add((xVecino,yVecino))                                                   
-                                                                                                            
-                if (xAdyacente,yAdyacente) in posiciones_bloqueadas:                                        #en condiciones normales se validan las celdas bloqueadas y se aumenta el contador
-                    cont+=1                                                                                 
-                elif (xAdyacente,yAdyacente) in fueraDeMatriz and (xVecino,yVecino) in dentroDeMatriz:      #si es un borde se toma las celdas fuera de la matriz como "bloqueadas" y se aumenta el contador
-                    cont+=1                                                                                 
-                                                                                                            
-                if cont==3:                                                                                 #Si una celda tiene 3 posiciones bloqueadas adyacentes no puede tener una cuarta porque sería una isla
-                    cont=0                                                                                  #
-                    boton= matriz_botones[y][x]                                                             #se manipula el color del botón seleccionado a uno mas oscuro para mostrar que está "bloqueado"
-                    boton.setStyleSheet("""
-                        font-size: {int(tamano_boton*0.6)}px; 
+        for xVecino, yVecino in coordenadas_adyacentes:
+            xVecino, yVecino = x + xVecino, y + yVecino
+            cont = 0
+            for xAdyacente, yAdyacente in coordenadas_adyacentes:
+                xAdyacente, yAdyacente = xAdyacente + xVecino, yAdyacente + yVecino
+                
+                if not (0 <= xAdyacente < columnas_actual and 0 <= yAdyacente < filas_actual):
+                    fueraDeMatriz.add((xAdyacente, yAdyacente))
+                if (0 <= xVecino < columnas_actual and 0 <= yVecino < filas_actual):
+                    dentroDeMatriz.add((xVecino, yVecino))
+                
+                if (xAdyacente, yAdyacente) in posiciones_bloqueadas:
+                    cont += 1
+                elif (xAdyacente, yAdyacente) in fueraDeMatriz and (xVecino, yVecino) in dentroDeMatriz:
+                    cont += 1
+                
+                if cont == 3:
+                    boton = matriz_botones[y][x]
+                    boton.setStyleSheet(f"""
+                        font-size: {int(boton.width()*0.6)}px; 
                         border: 2px outset #a4dbc7;
                         background: #a4dbc7;
                     """)
-                    posiciones_inhabilitadas.add((x, y))                                                    #Se inhabilita esa posicion para que no sea reemplazada por un muro
-                    mostrar_ventana_celdaBloqueada()                                                        #se muestra un mensaje que dice que no es una jugada valida
-                    
+                    posiciones_inhabilitadas.add((x, y))
+                    mostrar_ventana_celdaBloqueada()
+                    return
+
 def mostrar_ventana_celdaBloqueada():
+    """Muestra mensaje de celda bloqueada"""
     msg = QMessageBox()
     msg.setWindowTitle("Jugada no permitida")
-    pixmap = QPixmap("Imagenes\isla.png") 
-    pixmap = pixmap.scaled(150, 150,aspectRatioMode=Qt.AspectRatioMode.KeepAspectRatio)
-    msg.setIconPixmap(pixmap)
-    msg.setText("¡Esta jugada no es valida!")
+    try:
+        pixmap = QPixmap("Imagenes/isla.png")
+        pixmap = pixmap.scaled(150, 150, Qt.AspectRatioMode.KeepAspectRatio)
+        msg.setIconPixmap(pixmap)
+    except:
+        pass  # Si no encuentra la imagen, muestra el mensaje sin ella
+    
+    msg.setText("¡Esta jugada no es válida!")
     msg.setStandardButtons(QMessageBox.StandardButton.Ok)
     msg.exec()
 
-def guardar_partida(nombre_partida, estado_juego) -> bool:
-    """
-    Guarda el estado del juego en archivo binario y actualiza el registro JSON
-    Args:
-        nombre_partida: Nombre personalizado que el usuario asigna
-        estado_juego: Diccionario con el estado actual del juego
-    Returns:
-        bool: True si se guardó correctamente, False si hubo error
-    """
-    try:
-        # Configurar rutas y directorios
-        carpeta = "Partidas"
-        os.makedirs(carpeta, exist_ok=True)
-        
-        # Sanitizar nombre del archivo
-        nombre_archivo = f"{nombre_partida}.bin"
-        ruta_bin = os.path.join(carpeta, nombre_archivo)
-        ruta_json = os.path.join(carpeta, "registro_partidas.json")
-        
-        # Verificar si ya existe la partida
-        if os.path.exists(ruta_bin):
-            raise FileExistsError(f"Ya existe una partida con el nombre '{nombre_partida}'")
-
-        # Convertir matriz a representación hexadecimal
-        matriz_base3 = estado_matriz(
-            estado_juego['filas'],
-            estado_juego['columnas'],
-            estado_juego['infectadas'],
-            estado_juego['bloqueadas']
-        )
-        
-        hex_lista = []
-        for fila in matriz_base3:
-            fila_str = ''.join(map(str, fila))
-            num_decimal = int(fila_str, 3)
-            hex_lista.append(hex(num_decimal))
-
-        # Preparar datos con metadatos
-        datos = {
-            'nivel': estado_juego['nivel'],
-            'hex_data': hex_lista,
-            'datos_extra': {
-                'nombre': nombre_partida,
-                # 'fecha': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'filas': estado_juego['filas'],
-                'columnas': estado_juego['columnas']
-            }
-        }
-
-        # Guardar archivo binario
-        with open(ruta_bin, 'wb') as file:
-            pickle.dump(datos, file)
-        
-        # Actualizar registro JSON
-        actualizar_registro_partidas(ruta_json, nombre_partida, ruta_bin, datos)
-        
-        return True
-        
-    except Exception as e:
-        print(f"Error al guardar partida: {e}")
-        return False
-
-def actualizar_registro_partidas(ruta_json, nombre_partida, ruta_bin, datos):
-    """
-    Actualiza el archivo JSON con los datos extra de la partida
-    Args:
-        ruta_json: Ruta del archivo JSON de registro
-        nombre_partida: Nombre personalizado de la partida
-        ruta_bin: Ruta del archivo binario guardado
-        datos: Datos de la partida a registrar
-    """
-    try:
-        # Cargar registro existente o crear nuevo
-        if os.path.exists(ruta_json):
-            with open(ruta_json, 'r', encoding='utf-8') as file:
-                registro = json.load(file)
-        else:
-            registro = {}
-        
-        # Actualizar registro
-        registro[nombre_partida] = {
-            'archivo': os.path.basename(ruta_bin),
-            'nivel': datos['nivel'],
-            # 'fecha': datos['metadata']['fecha'],
-            'ruta_completa': ruta_bin
-        }
-        
-        # Guardar registro
-        with open(ruta_json, 'w', encoding='utf-8') as file:
-            json.dump(registro, file, indent=2, ensure_ascii=False)
-            
-    except Exception as e:
-        print(f"Error al actualizar registro: {e}")
-
-def guardar_partida_interfaz():
-    """
-    Muestra diálogo para guardar partida y maneja la interacción con el usuario
-    """
-    nombre, ok = QInputDialog.getText(
-        ventana_juego, 
-        "Guardar partida",
-        "Nombre para esta partida:",
-        QLineEdit.EchoMode.Normal,
-        # f"partida_{datetime.now().strftime('%Y%m%d_%H%M')}"
-    )
-    
-    if ok and nombre:
-        estado_actual = {
-            'nivel': nivel_actual,
-            'filas': filas_actual,
-            'columnas': columnas_actual,
-            'infectadas': posiciones_infectadas,
-            'bloqueadas': posiciones_bloqueadas
-        }
-        
-        if guardar_partida(nombre, estado_actual):
-            QMessageBox.information(ventana_juego, "Éxito", f"Partida '{nombre}' guardada correctamente")
-        else:
-            QMessageBox.warning(ventana_juego, "Error", "No se pudo guardar la partida")
-
-
-
+def verificar_estado_juego():
+    """Verifica si el jugador ha ganado o perdido"""
+    # Si no hay celdas libres que no sean bloqueadas
+    celdas_libres = filas_actual * columnas_actual - len(posiciones_bloqueadas) - len(posiciones_infectadas)
+    if celdas_libres == 0:
+        # Mostrar mensaje de victoria
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Ganaste!")
+        msg.setText("¡Has contenido el virus completamente!")
+        msg.exec_()
+    elif len(posiciones_infectadas) == 0:
+        # Mostrar mensaje de derrota (virus eliminado completamente es improbable)
+        msg = QMessageBox()
+        msg.setWindowTitle("Juego terminado")
+        msg.setText("El virus ha sido eliminado")
+        msg.exec_()
 
 # Iniciar la aplicación
 mostrar_menu_principal()
