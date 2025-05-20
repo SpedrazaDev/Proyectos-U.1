@@ -1,3 +1,4 @@
+from collections import deque
 import os
 import pickle
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, 
@@ -11,6 +12,7 @@ import random as rd
 import sys
 import json
 from datetime import datetime
+
 
 
 def centrar_ventana(ventana):
@@ -55,15 +57,15 @@ ventana_niveles.setStyleSheet("background-color: #f0f0f0;")
 # Variables globales
 grid_layout = QGridLayout()
 matriz_botones = []
-posiciones_infectadas = set()
-posiciones_bloqueadas = set()
-posiciones_inhabilitadas = set()
+posiciones_infectadas = set()     # Posiciones infectadas
+posiciones_bloqueadas = set()     # Posiciones con bloques
+posiciones_inhabilitadas = set()  # Posiciones no seleccionables
 filas_actual = 0
 columnas_actual = 0
 nivel_actual = "Facil"  # Valor por defecto
 
 def mostrar_menu_principal():
-    """Muestra el menú principal centrado"""
+    """Muestra el menú principal"""
     layout = QVBoxLayout()
     
     titulo = QLabel("Menú Principal")
@@ -115,7 +117,7 @@ def mostrar_menu_principal():
     ventana_menu.show()
 
 def mostrar_menu_niveles():
-    """Muestra el menú de niveles centrado"""
+    """Muestra el menú de niveles"""
     ventana_menu.hide()
     
     layout = QVBoxLayout()
@@ -174,7 +176,7 @@ def crear_Matriz(tamano, nivel, cargando_partida=False):
     filas_actual = tamano
     columnas_actual = tamano
     
-    # Limpiar estado anterior
+    # Limpieza de estado anterior
     ventana_niveles.hide()
     matriz_botones.clear()
     posiciones_infectadas.clear()
@@ -187,7 +189,7 @@ def crear_Matriz(tamano, nivel, cargando_partida=False):
         if child.widget():
             child.widget().deleteLater()
     
-    # Calcular tamaño de botón
+    # Tamaño de botones según nivel
     tamano_boton = 40 if tamano <= 15 else 30
 
     # Crear matriz de botones
@@ -201,13 +203,12 @@ def crear_Matriz(tamano, nivel, cargando_partida=False):
                 border: 2px outset #a8e6ad;
                 background: #a8e6ad;
             """)
-            boton.clicked.connect(lambda _, x=x, y=y: evitar_islas(x, y))
             boton.clicked.connect(lambda _, px=x, py=y: boton_Usr(px, py))
             grid_layout.addWidget(boton, y, x)
             fila_botones.append(boton)
         matriz_botones.append(fila_botones)
     
-    # Botón para volver
+    # Botones inferiores
     btn_volver = QPushButton("Volver al Menú")
     btn_volver.setStyleSheet("""
         font-size: 16px; padding: 10px;
@@ -253,25 +254,66 @@ def infectar_celda(x: int, y: int) -> bool:
             font-size: {int(tamano_boton*0.6)}px;
         """)
         posiciones_infectadas.add((x, y))
+        
         return True
     return False
 
 def boton_Usr(x, y):
     """Maneja el clic del jugador para colocar bloques"""
-    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas and (x, y) not in posiciones_inhabilitadas:
-        boton = matriz_botones[y][x]
-        tamano_boton = boton.width()
-        boton.setText("🧱")
-        boton.setStyleSheet(f"""
-            background-color: #f5e8c9;  
-            border: 2px inset #f5e8c9;  
-            font-size: {int(tamano_boton*0.6)}px;
-        """)
-        posiciones_bloqueadas.add((x, y))
-        propagar_virus()
+    # Verificar si la posición es válida
+    if (x, y) in posiciones_infectadas \
+       or (x, y) in posiciones_bloqueadas \
+       or (x, y) in posiciones_inhabilitadas:
+        return
+    
+    # Si crea isla, la función ya marca la celda como inhabilitada y muestra mensaje
+    if evitar_islas(x, y):
+        return    
+        
+    boton = matriz_botones[y][x]
+    tamano_boton = boton.width()
+    boton.setText("🧱")
+    boton.setStyleSheet(f"""
+        background-color: #f5e8c9;  
+        border: 2px inset #f5e8c9;  
+        font-size: {int(tamano_boton*0.6)}px;
+    """)
+    posiciones_bloqueadas.add((x, y))
+    
+    # Verificar estado después de colocar el bloque
+    estado = verificar_estado_juego()
+    if estado == "victoria":
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Ganaste!")
+        msg.setText("¡Has contenido el virus completamente!")
+        msg.exec()
+        return
+    elif estado == "derrota":
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Perdiste!")
+        msg.setText("¡El virus te ha contenido completamente!")
+        msg.exec()
+        return
+    
+    # Solo propagar si el juego no ha terminado
+    propagar_virus()
+    
+    # Verificar estado nuevamente después de la propagación
+    estado = verificar_estado_juego()
+    if estado == "victoria":
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Ganaste!")
+        msg.setText("¡Has contenido el virus completamente!")
+        msg.exec()
+    elif estado == "derrota":
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Perdiste!")
+        msg.setText("¡El virus te ha contenido completamente!")
+        msg.exec()
+    
 
 def propagar_virus():
-    """Propaga el virus a celdas adyacentes"""
+    """Propaga el virus a celdas adyacentes según el nivel"""
     celdas_a_infectar = set()
     coordenadas_adyacentes = ((0,1), (1,0), (0,-1), (-1,0))
     
@@ -286,6 +328,7 @@ def propagar_virus():
     if not celdas_a_infectar:
         return
     
+    # Infectar según nivel de dificultad
     if nivel_actual == "Facil":
         infectar_celda(*rd.choice(list(celdas_a_infectar)))
     
@@ -298,6 +341,21 @@ def propagar_virus():
         infectadas = rd.sample(list(celdas_a_infectar), min(3, len(celdas_a_infectar)))
         for celda in infectadas:
             infectar_celda(*celda)
+
+     # Verificar estado después de propagación
+    estado = verificar_estado_juego()
+    if estado == "victoria":
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Ganaste!")
+        msg.setText("¡Has contenido el virus completamente!")
+        msg.exec()
+    elif estado == "derrota":
+        msg = QMessageBox()
+        msg.setWindowTitle("¡Perdiste!")
+        msg.setText("¡El virus te ha contenido completamente!")
+        msg.exec()
+
+
 
 def estado_matriz(filas, columnas, infectadas, bloqueadas):
     """Crea una representación del estado del juego"""
@@ -479,14 +537,13 @@ def guardar_PartidasBin(nombre_partida, estado_juego):
             f.write(columnas.to_bytes(2, byteorder='big'))
             f.write(nivel_num.to_bytes(1, byteorder='big'))
             
-            # Escribir cada fila
+            # Escribir cada fila como número en base 3
             for fila in matriz_base3:
-                # Convertir lista base3 a número
                 num = 0
                 for i, val in enumerate(fila):
                     num += val * (3 ** (len(fila) - i - 1))
                 
-                # Convertir a bytes con tamaño fijo
+                # Calcular bytes necesarios y escribir
                 bytes_necesarios = (len(fila) * 2 + 7) // 8  # Calcula bytes necesarios
                 f.write(num.to_bytes(bytes_necesarios, byteorder='big'))
         
@@ -513,7 +570,7 @@ def cargar_PartidaBin(nombre_partida):
             # Calcular bytes por fila
             bytes_por_fila = (columnas * 2 + 7) // 8
             
-            # Leer cada fila
+            # Leer y reconstruir cada fila
             matriz_base3 = []
             for _ in range(filas):
                 num = int.from_bytes(f.read(bytes_por_fila), 'big')
@@ -541,42 +598,62 @@ def cargar_PartidaBin(nombre_partida):
         return None
 
 
+def evitar_islas(x_sel: int, y_sel: int) -> bool:
+    """
+    Comprueba si colocar un muro crea islas de celdas NO infectadas.
+    Versión corregida que ignora el área contenida del virus.
+    """
 
-def evitar_islas(x: int, y: int):
-    """Evita que se creen islas al colocar bloques"""
-    cont = 0
-    fueraDeMatriz = set()
-    dentroDeMatriz = set()
+     # Simular bloqueo temporal
+    bloqueadas_temp = set(posiciones_bloqueadas)
+    bloqueadas_temp.add((x_sel, y_sel))
 
-    coordenadas_adyacentes = ((0,1), (1,0), (0,-1), (-1,0))
-    if (x, y) not in posiciones_infectadas and (x, y) not in posiciones_bloqueadas:
-        
-        for xVecino, yVecino in coordenadas_adyacentes:
-            xVecino, yVecino = x + xVecino, y + yVecino
-            cont = 0
-            for xAdyacente, yAdyacente in coordenadas_adyacentes:
-                xAdyacente, yAdyacente = xAdyacente + xVecino, yAdyacente + yVecino
-                
-                if not (0 <= xAdyacente < columnas_actual and 0 <= yAdyacente < filas_actual):
-                    fueraDeMatriz.add((xAdyacente, yAdyacente))
-                if (0 <= xVecino < columnas_actual and 0 <= yVecino < filas_actual):
-                    dentroDeMatriz.add((xVecino, yVecino))
-                
-                if (xAdyacente, yAdyacente) in posiciones_bloqueadas:
-                    cont += 1
-                elif (xAdyacente, yAdyacente) in fueraDeMatriz and (xVecino, yVecino) in dentroDeMatriz:
-                    cont += 1
-                
-                if cont == 3:
-                    boton = matriz_botones[y][x]
+    filas, columnas = filas_actual, columnas_actual
+    visitado = set()
+    queue = deque()
+
+    # Agregamos todos los bordes que sean celdas transitables (no bloqueadas ni infectadas)
+    for x in range(columnas):
+        for y in [0, filas-1]:  # Borde superior e inferior
+            if (x, y) not in bloqueadas_temp and (x, y) not in posiciones_infectadas:
+                queue.append((x, y))
+                visitado.add((x, y))
+    for y in range(filas):
+        for x in [0, columnas-1]:  # Borde izquierdo y derecho
+            if (x, y) not in bloqueadas_temp and (x, y) not in posiciones_infectadas:
+                queue.append((x, y))
+                visitado.add((x, y))
+
+    # Propagación desde los bordes
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+            nx, ny = x + dx, y + dy
+            if (0 <= nx < columnas and 0 <= ny < filas
+                and (nx, ny) not in bloqueadas_temp
+                and (nx, ny) not in posiciones_infectadas
+                and (nx, ny) not in visitado):
+                visitado.add((nx, ny))
+                queue.append((nx, ny))
+
+    # Verificar si hay celdas no alcanzadas
+    for y in range(filas):
+        for x in range(columnas):
+            if (x, y) not in bloqueadas_temp and (x, y) not in posiciones_infectadas:
+                if (x, y) not in visitado:
+                    # Celda no infectada aislada -> jugada inválida
+                    posiciones_inhabilitadas.add((x_sel, y_sel))
+                    boton = matriz_botones[y_sel][x_sel]
                     boton.setStyleSheet(f"""
-                        font-size: {int(boton.width()*0.6)}px; 
+                        font-size: {int(boton.width()*0.6)}px;
                         border: 2px outset #a4dbc7;
                         background: #a4dbc7;
                     """)
-                    posiciones_inhabilitadas.add((x, y))
                     mostrar_ventana_celdaBloqueada()
-                    return
+                    return True
+
+    return False
+
 
 def mostrar_ventana_celdaBloqueada():
     """Muestra mensaje de celda bloqueada"""
@@ -593,22 +670,40 @@ def mostrar_ventana_celdaBloqueada():
     msg.setStandardButtons(QMessageBox.StandardButton.Ok)
     msg.exec()
 
-def verificar_estado_juego():
-    """Verifica si el jugador ha ganado o perdido"""
-    # Si no hay celdas libres que no sean bloqueadas
-    celdas_libres = filas_actual * columnas_actual - len(posiciones_bloqueadas) - len(posiciones_infectadas)
-    if celdas_libres == 0:
-        # Mostrar mensaje de victoria
-        msg = QMessageBox()
-        msg.setWindowTitle("¡Ganaste!")
-        msg.setText("¡Has contenido el virus completamente!")
-        msg.exec_()
-    elif len(posiciones_infectadas) == 0:
-        # Mostrar mensaje de derrota (virus eliminado completamente es improbable)
-        msg = QMessageBox()
-        msg.setWindowTitle("Juego terminado")
-        msg.setText("El virus ha sido eliminado")
-        msg.exec_()
+
+
+
+
+def verificar_estado_juego() -> str:
+    """Retorna el estado del juego: 'victoria', 'derrota' o 'en progreso'"""
+    # Verificar si el virus puede expandirse
+    puede_expandirse = False
+    celdas_libres = 0
+    
+    # Contar celdas libres y verificar expansión posible
+    for y in range(filas_actual):
+        for x in range(columnas_actual):
+            if (x, y) not in posiciones_bloqueadas and (x, y) not in posiciones_infectadas:
+                celdas_libres += 1
+                
+            if (x, y) in posiciones_infectadas:
+                # Verificar si el virus puede expandirse desde esta celda
+                for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                    nx, ny = x + dx, y + dy
+                    if (0 <= nx < columnas_actual and 0 <= ny < filas_actual and
+                        (nx, ny) not in posiciones_bloqueadas and 
+                        (nx, ny) not in posiciones_infectadas):
+                        puede_expandirse = True
+                        break
+                if puede_expandirse:
+                    break
+    
+    if not puede_expandirse:
+        if celdas_libres > 0:
+            return "victoria"  # Virus contenido y quedan celdas libres
+        else:
+            return "derrota"   # Virus contenido pero no quedan celdas libres
+    return "en progreso"       # El juego continúa
 
 # Iniciar la aplicación
 mostrar_menu_principal()
